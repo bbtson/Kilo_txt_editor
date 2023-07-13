@@ -19,7 +19,7 @@
 
 /*** defines ***/
 
-#define KILO_VERSION "0.0.2"
+#define KILO_VERSION "0.1.0"
 #define KILO_TAB_STOP 4
 #define KILO_QUIT_TIMES 3
 
@@ -84,7 +84,9 @@ struct editorConfig {
 	erow *row;
 	int dirty;
 	char *filename;
-	char statusmsg[80];
+	char statusmsg[120];
+	char *Cbuff; // Copy buffer
+	int Cbuff_len;
 	time_t statusmsg_time;
 	struct editorSyntax *syntax;
 	struct termios orig_termios;
@@ -484,7 +486,7 @@ void editorDelRow(int at){
 }
 
 void editorRowInsertChar(erow *row, int at, int c){
-	if(at < 0 || row -> size) at = row -> size;
+	if(at < 0 || at > row -> size) at = row -> size;
 	row->chars = realloc(row->chars, row->size + 2);
 	memmove(&row -> chars[at + 1], &row -> chars[at], row -> size - at + 1);
 	row->size++;
@@ -508,6 +510,21 @@ void editorRowDelChar(erow *row, int at){
 	row->size--;
 	editorUpdateRow(row);
 	E.dirty++;
+}
+
+void editorCopyRow(erow *row){
+	if(!E.Cbuff){
+		free(E.Cbuff);
+	}
+	E.Cbuff = realloc(E.Cbuff, row->size);
+	memmove(E.Cbuff, row->chars, row->size);
+	E.Cbuff_len = row->size;
+	editorDelRow(row->idx);
+	E.cx = 0;
+}
+
+void editorPasteRow(){
+	editorInsertRow(E.cy,E.Cbuff,E.Cbuff_len);
 }
 
 /*** editor operations ***/
@@ -753,12 +770,12 @@ void editorDrawRows(struct abuf *ab){
 				char welcome[80];
 				int welcomelen = snprintf(welcome, sizeof(welcome), "Kilo editor -- version %s", KILO_VERSION); // writes string in welcom and prints it
 				if(welcomelen > E.screencols) welcomelen = E.screencols;
-				int padding = (E.screencols - welcomelen) / 2;
-				if(padding){
+				int welcome_padding = (E.screencols - welcomelen) / 2;
+				if(welcome_padding){
 					abAppend(ab, "~", 1);
-					padding--;
+					welcome_padding--;
 				}
-				while(padding--) abAppend(ab, " ", 1);
+				while(welcome_padding--) abAppend(ab, " ", 1);
 				abAppend(ab, welcome, welcomelen);
 			} else {
 				abAppend(ab, "~", 1);
@@ -963,7 +980,12 @@ void editorProcessKeypress(){
 		case CTRL_KEY('s'):
 			editorSave();
 			break;
-
+		case CTRL_KEY('c'):
+			editorCopyRow(&E.row[E.cy]);
+			break;
+		case CTRL_KEY('x'):
+			editorPasteRow();
+			break;
 		case HOME_KEY:
 			E.cx = 0;
 			break;
@@ -1029,6 +1051,8 @@ void initEditor(){
 	E.statusmsg[0] = '\0';
 	E.statusmsg_time = 0;
 	E.syntax = NULL;
+	E.Cbuff = NULL;
+	E.Cbuff_len = 0;
 
 	if (getWindowSize(&E.screenrows, &E.screencols) == -1) die("getWindowSize");
 	E.screenrows -= 2;
@@ -1044,7 +1068,7 @@ int main(int argc, char *argv[])
 		editorOpen(argv[1]);
 	}
 
-	editorSetStatusMessage("HELP: Ctrl-S = save | Crtl-Q = quit | Ctrl-F = find");
+	editorSetStatusMessage("HELP: Ctrl-C = Copy | Ctrl-X = Paste | Ctrl-S = save | Crtl-Q = quit | Ctrl-F = find");
 
 	while(1){
 		editorRefreshScreen();
